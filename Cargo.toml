@@ -1,5 +1,5 @@
 [package]
-name = "binary-heap"
+name = "binary_heap"
 version = "0.1.0"
 authors = ["Ashish Anand <ashishmax31@gmail.com>"]
 edition = "2018"
