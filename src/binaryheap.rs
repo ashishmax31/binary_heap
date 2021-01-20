@@ -61,9 +61,9 @@ where
     fn bubble_down(&mut self, start: usize) {
         if !self.verify_heap_property(start) {
             let children_indices = Self::children_indices(start);
-            let min_ind = self.min_index(children_indices);
-            self.elements.swap(min_ind, start);
-            self.bubble_down(min_ind)
+            let priority_ind = self.index_with_priority(children_indices);
+            self.elements.swap(priority_ind, start);
+            self.bubble_down(priority_ind)
         }
     }
 
@@ -73,7 +73,7 @@ where
         self.verify_parent(index, current_node) && self.verify_children(index, current_node)
     }
 
-    fn min_index(&self, indices: [usize; 2]) -> usize {
+    fn index_with_priority(&self, indices: [usize; 2]) -> usize {
         let child1 = self.element_at(indices[0]);
         let child2 = self.element_at(indices[1]);
         match child1.zip(child2) {
