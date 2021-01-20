@@ -1,3 +1,4 @@
+#![warn(clippy::all)]
 use std::collections::VecDeque;
 
 pub enum HeapKind {
@@ -14,10 +15,10 @@ impl<T> BinaryHeap<T>
 where
     T: std::cmp::PartialOrd,
 {
-    pub fn new(kind: HeapKind) -> Self {
+    pub fn new(heap_type: HeapKind) -> Self {
         Self {
             elements: VecDeque::new(),
-            kind: kind,
+            kind: heap_type,
         }
     }
 
@@ -98,13 +99,7 @@ where
 
     fn verify_parent(&self, child_node_ind: usize, child: &T) -> bool {
         match self.element_at(Self::parent_index(child_node_ind)) {
-            Some(parent) => {
-                if self.verify_priority(parent, child) {
-                    true
-                } else {
-                    false
-                }
-            }
+            Some(parent) => self.verify_priority(parent, child),
             None => true,
         }
     }
