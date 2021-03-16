@@ -29,6 +29,7 @@ where
         })
     }
 
+    // O(log n)
     pub fn insert(&mut self, object: T) {
         self.elements.push_back(object);
         let inserted_index = self.elements.len() - 1;
@@ -36,14 +37,17 @@ where
     }
 
     // Extract the highest_priority object from the heap
+    // O(log n)
     pub fn extract_object(&mut self) -> Option<T> {
         let max_priority_elem = self.elements.pop_front();
         match self.elements.pop_back() {
-            Some(last_entry) => self.elements.push_front(last_entry),
-            None => return max_priority_elem,
+            Some(last_entry) => {
+                self.elements.push_front(last_entry);
+                self.bubble_down(0);
+                max_priority_elem
+            }
+            None => max_priority_elem,
         }
-        self.bubble_down(0);
-        max_priority_elem
     }
 
     pub fn peek(&self) -> Option<&T> {
@@ -66,19 +70,21 @@ where
     }
 
     fn bubble_up(&mut self, start_ind: usize) {
-        if !self.verify_heap_property(start_ind) {
-            let parent_ind = self.parent_index(start_ind).unwrap();
-            self.elements.swap(start_ind, parent_ind);
-            self.bubble_up(parent_ind)
+        let mut new_element_pos = start_ind;
+        while !self.verify_heap_property(new_element_pos) {
+            let parent_ind = self.parent_index(new_element_pos).unwrap();
+            self.elements.swap(new_element_pos, parent_ind);
+            new_element_pos = parent_ind;
         }
     }
 
-    fn bubble_down(&mut self, start: usize) {
-        if !self.verify_heap_property(start) {
-            let children_indices = self.children_indices(start);
+    fn bubble_down(&mut self, start_ind: usize) {
+        let mut new_element_pos = start_ind;
+        while !self.verify_heap_property(new_element_pos) {
+            let children_indices = self.children_indices(new_element_pos);
             let priority_ind = self.index_with_priority(children_indices);
-            self.elements.swap(priority_ind, start);
-            self.bubble_down(priority_ind)
+            self.elements.swap(priority_ind, new_element_pos);
+            new_element_pos = priority_ind;
         }
     }
 
