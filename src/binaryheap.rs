@@ -1,24 +1,35 @@
 #![warn(clippy::all)]
+use ::core::hash::{BuildHasher, Hasher};
+use hashbrown::HashMap;
+use std::collections::hash_map::RandomState;
 use std::collections::VecDeque;
+
+const PARENT_VIOLATION: &str = "PARENT_VIOLATION";
+const CHILDREN_VIOLATION: &str = "CHILDREN_VIOLATION";
 
 pub enum HeapKind {
     Max,
     Min,
 }
 
-pub struct BinaryHeap<T> {
+pub struct BinaryHeap<T, S = RandomState> {
     elements: VecDeque<T>,
     kind: HeapKind,
+    element_indices: HashMap<u64, Vec<usize>>,
+    hash_builder: S,
 }
 
-impl<T> BinaryHeap<T>
+impl<T, S> BinaryHeap<T, S>
 where
-    T: std::cmp::PartialOrd + Clone,
+    T: std::cmp::PartialOrd + Clone + std::hash::Hash + std::cmp::Eq + std::fmt::Debug,
+    S: BuildHasher + Default,
 {
     pub fn new(heap_type: HeapKind) -> Self {
         Self {
             elements: VecDeque::new(),
             kind: heap_type,
+            element_indices: HashMap::new(),
+            hash_builder: S::default(),
         }
     }
 
@@ -31,22 +42,152 @@ where
 
     // O(log n)
     pub fn insert(&mut self, object: T) {
-        self.elements.push_back(object);
-        let inserted_index = self.elements.len() - 1;
-        self.bubble_up(inserted_index);
+        self.push_back(object);
+        let currently_inserted_index = self.elements.len() - 1;
+        self.bubble_up(currently_inserted_index);
     }
 
     // Extract the highest_priority object from the heap
     // O(log n)
     pub fn extract_object(&mut self) -> Option<T> {
+        self.handle_table_changes();
         let max_priority_elem = self.elements.pop_front();
         match self.elements.pop_back() {
             Some(last_entry) => {
-                self.elements.push_front(last_entry);
+                self.push_front(last_entry);
                 self.bubble_down(0);
                 max_priority_elem
             }
             None => max_priority_elem,
+        }
+    }
+
+    pub fn remove_object(&mut self, object: &T) -> Option<T> {
+        if let Some(present_indices) = self.get_index(object) {
+            let index_to_remove = present_indices[0];
+            let last_element_index = self.len() - 1;
+            // If the element to be removed is the first element in the vector, then we simply call extract_object().
+            // On the otherhand, if the element is the last element in the vector, we remove the element's index entry from the table
+            // and then call pop_back on the vector.
+            match index_to_remove {
+                0 => self.extract_object(),
+                x if x == last_element_index => {
+                    self.remove_from_table(last_element_index, last_element_index);
+                    self.elements.pop_back()
+                }
+                _ => {
+                    self.swap_elements(index_to_remove, last_element_index);
+                    self.remove_from_table(last_element_index, last_element_index);
+                    let removed_element = self.elements.pop_back();
+                    let res = self.check_heap_invariants_at(
+                        index_to_remove,
+                        self.element_at(index_to_remove).unwrap(),
+                    );
+                    self.ensure_heap_invariants(res, index_to_remove);
+                    removed_element
+                }
+            }
+        } else {
+            None
+        }
+    }
+
+    fn ensure_heap_invariants(
+        &mut self,
+        invariant_status: (Option<&'static str>, Option<&'static str>),
+        concerned_index: usize,
+    ) {
+        match invariant_status {
+            (Some(a), Some(b)) => {
+                self.fix_invariant(concerned_index, a);
+                self.fix_invariant(concerned_index, b);
+            }
+            (None, Some(a)) => self.fix_invariant(concerned_index, a),
+            (Some(a), None) => self.fix_invariant(concerned_index, a),
+            (None, None) => {}
+        };
+    }
+
+    fn fix_invariant(&mut self, concerned_index: usize, invariant: &'static str) {
+        match invariant {
+            error if error == PARENT_VIOLATION => self.bubble_up(concerned_index),
+            error if error == CHILDREN_VIOLATION => self.bubble_down(concerned_index),
+            _ => panic!("Unsupported heap invariant"),
+        }
+    }
+
+    fn check_heap_invariants_at(
+        &self,
+        disturbed_index: usize,
+        element: &T,
+    ) -> (Option<&'static str>, Option<&'static str>) {
+        match (
+            self.verify_parent(disturbed_index, element),
+            self.verify_children(disturbed_index, element),
+        ) {
+            (true, true) => (None, None),
+            (true, false) => (None, Some(CHILDREN_VIOLATION)),
+            (false, true) => (Some(PARENT_VIOLATION), None),
+            (false, false) => (Some(PARENT_VIOLATION), Some(CHILDREN_VIOLATION)),
+        }
+    }
+
+    fn handle_table_changes(&mut self) {
+        if self.elements.front().is_some() {
+            self.remove_from_table(0, 0);
+        }
+        if self.elements.back().is_some() {
+            let vec_len = self.elements.len() - 1;
+            self.remove_from_table(vec_len, vec_len);
+        }
+    }
+
+    fn update_table_for_element_entry(&mut self, element_index: usize) {
+        let hash_value =
+            Self::hash_value(&self.hash_builder, &self.element_at(element_index).unwrap());
+
+        if let Some(element_present_at) = self.element_indices.get_mut(&hash_value) {
+            //  Duplicates
+            element_present_at.push(element_index);
+        } else {
+            // Insert the elements index in the vector [Element is unique in the vector]
+            self.element_indices.insert(hash_value, vec![element_index]);
+        }
+    }
+
+    fn update_table_for_swap(&mut self, ind1: usize, ind2: usize) {
+        self.remove_from_table(ind1, ind2);
+        self.remove_from_table(ind2, ind1);
+        self.update_table_for_element_entry(ind1);
+        self.update_table_for_element_entry(ind2);
+    }
+
+    pub(crate) fn get_index(&self, element: &T) -> Option<&[usize]> {
+        let hash_value = Self::hash_value(&self.hash_builder, element);
+        let present_indices = self.element_indices.get(&hash_value).and_then(|indicies| {
+            if indicies.is_empty() {
+                None
+            } else {
+                Some(indicies)
+            }
+        });
+        present_indices.map(|indices| &indices[..])
+    }
+
+    fn remove_from_table(&mut self, element_ind: usize, element_was_at: usize) {
+        let hash_value =
+            Self::hash_value(&self.hash_builder, &self.element_at(element_ind).unwrap());
+        if let Some(indices) = self.element_indices.get_mut(&hash_value) {
+            let items_to_be_retained: Vec<usize> = indices
+                .iter()
+                .filter(|ind| **ind != element_was_at)
+                .copied()
+                .collect();
+            indices.clear();
+            assert_eq!(indices.len(), 0);
+            items_to_be_retained.into_iter().for_each(|ind| {
+                indices.push(ind);
+            });
         }
     }
 
@@ -73,7 +214,7 @@ where
         let mut new_element_pos = start_ind;
         while !self.verify_heap_property(new_element_pos) {
             let parent_ind = self.parent_index(new_element_pos).unwrap();
-            self.elements.swap(new_element_pos, parent_ind);
+            self.swap_elements(new_element_pos, parent_ind);
             new_element_pos = parent_ind;
         }
     }
@@ -83,7 +224,7 @@ where
         while !self.verify_heap_property(new_element_pos) {
             let children_indices = self.children_indices(new_element_pos);
             let priority_ind = self.index_with_priority(children_indices);
-            self.elements.swap(priority_ind, new_element_pos);
+            self.swap_elements(priority_ind, new_element_pos);
             new_element_pos = priority_ind;
         }
     }
@@ -130,7 +271,7 @@ where
             })
     }
 
-    fn element_at(&self, ind: usize) -> Option<&T> {
+    pub(crate) fn element_at(&self, ind: usize) -> Option<&T> {
         self.elements.get(ind)
     }
 
@@ -160,6 +301,31 @@ where
             (None, None) => [None, None],
         }
     }
+
+    fn hash_value(hash_builder: &S, element: &T) -> u64 {
+        let mut h = hash_builder.build_hasher();
+        element.hash(&mut h);
+        h.finish()
+    }
+
+    fn push_back(&mut self, object: T) {
+        self.elements.push_back(object);
+        let currently_inserted_index = self.elements.len() - 1;
+        self.update_table_for_element_entry(currently_inserted_index);
+    }
+
+    fn push_front(&mut self, object: T) {
+        self.elements.push_front(object);
+        self.update_table_for_element_entry(0);
+    }
+
+    fn swap_elements(&mut self, ind1: usize, ind2: usize) {
+        //  1, 0
+        self.elements.swap(ind1, ind2);
+        // 3, 4
+        self.update_table_for_swap(ind1, ind2);
+        // 0, 1
+    }
 }
 
 fn even(num: usize) -> bool {
@@ -171,7 +337,7 @@ mod tests {
     use super::*;
     #[test]
     fn test_parent_and_child_indices() {
-        let heap = BinaryHeap::heapify(&[4, 4, 8, 9, 5, 12, 11, 13], HeapKind::Min);
+        let heap = BinaryHeap::<i32>::heapify(&[4, 4, 8, 9, 5, 12, 11, 13], HeapKind::Min);
         assert_eq!(heap.parent_index(0), None);
         assert_eq!(heap.parent_index(1), Some(0));
         assert_eq!(heap.parent_index(2), Some(0));
