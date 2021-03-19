@@ -7,8 +7,7 @@ pub use binaryheap::HeapKind;
 mod tests {
     use super::*;
     use rand::distributions::Standard;
-    use rand::seq::IteratorRandom;
-    use rand::seq::SliceRandom;
+    use rand::seq::{IteratorRandom, SliceRandom};
     use rand::{thread_rng, Rng};
     use std::collections::HashSet;
 

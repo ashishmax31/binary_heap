@@ -24,22 +24,28 @@ where
     T: std::cmp::PartialOrd + Clone + std::hash::Hash + std::cmp::Eq + std::fmt::Debug,
     S: BuildHasher + Default,
 {
-    pub fn new(heap_type: HeapKind) -> Self {
+    pub fn new_with_capacity(heap_type: HeapKind, elements_size: usize) -> Self {
         Self {
-            elements: VecDeque::new(),
+            elements: VecDeque::with_capacity(elements_size),
             kind: heap_type,
-            element_indices: HashMap::new(),
+            element_indices: HashMap::with_capacity(elements_size),
             hash_builder: S::default(),
         }
     }
 
     pub fn heapify(items: &[T], kind: HeapKind) -> Self {
-        items.iter().fold(Self::new(kind), |mut acc, item| {
-            acc.insert(item.clone());
-            acc
-        })
+        items.iter().fold(
+            Self::new_with_capacity(kind, items.len()),
+            |mut acc, item| {
+                acc.insert(item.clone());
+                acc
+            },
+        )
     }
 
+    pub fn new(heap_type: HeapKind) -> Self {
+        Self::new_with_capacity(heap_type, 0)
+    }
     // O(log n)
     pub fn insert(&mut self, object: T) {
         self.push_back(object);
